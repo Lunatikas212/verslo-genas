@@ -180,6 +180,10 @@ def find_and_click_button(page, button_text: str) -> bool:
         # Look for divs or spans that might be clickable and contain the text
         f"div:has-text(\"{normalized_text}\")",
         f"span:has-text(\"{normalized_text}\")",
+        # Specific selectors for the voting button based on observed HTML
+        f"div.cursor-pointer:has-text(\"{normalized_text}\")",
+        f"div.bg-single-btn:has-text(\"{normalized_text}\")",
+        f"div.rounded-[52px]:has-text(\"{normalized_text}\")",
     ]
 
     # Try text locator first
@@ -210,7 +214,7 @@ def find_and_click_button(page, button_text: str) -> bool:
             # If direct click fails, try to find a clickable parent
             try:
                 # Look for clickable parent elements
-                parent_selectors = ["button", "a", "[role=button]", "input[type=submit]", "input[type=button]", "div[onclick]", "span[onclick]"]
+                parent_selectors = ["button", "a", "*[@role='button']", "input[@type='submit']", "input[@type='button']", "div[@onclick]", "span[@onclick]", "div[contains(@class, 'cursor-pointer')]"]
                 for parent_sel in parent_selectors:
                     parent = element.locator(f"xpath=ancestor-or-self::{parent_sel}").first
                     if parent.count() > 0:
@@ -237,6 +241,8 @@ def find_and_click_button(page, button_text: str) -> bool:
         ".btn-vote",
         "[data-action='vote']",
         "[data-testid*='vote']",
+        "div.cursor-pointer",  # General clickable divs
+        "div.bg-single-btn",  # Specific class from HTML
     ]
     
     for selector in vote_selectors:
