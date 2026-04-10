@@ -6,7 +6,7 @@ import random
 import sys
 import time
 import requests
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 
 
@@ -137,6 +137,11 @@ def find_and_click_button(page, button_text: str) -> bool:
     all_buttons = page.locator("button")
     logging.info(f"Found {all_buttons.count()} button elements on page")
     
+    # Check if the text is actually visible on the page
+    page_text = page.inner_text("body")
+    text_present = normalized_text.lower() in page_text.lower()
+    logging.info(f"Button text '{normalized_text}' present in page body: {text_present}")
+    
     if locator.count() > 0:
         element = locator.first
         tag_name = element.evaluate("el => el.tagName")
@@ -145,6 +150,25 @@ def find_and_click_button(page, button_text: str) -> bool:
         # Check if it's visible
         is_visible = element.is_visible()
         logging.info(f"Element is visible: {is_visible}")
+        
+        # Check if element has event listeners
+        has_events = element.evaluate("""
+            el => {
+                const events = [];
+                for (const attr of el.attributes) {
+                    if (attr.name.startsWith('on')) {
+                        events.push(attr.name);
+                    }
+                }
+                return {
+                    hasOnClick: el.onclick !== null || el.hasAttribute('onclick'),
+                    hasDataAttrs: Array.from(el.attributes).some(attr => attr.name.startsWith('data-')),
+                    eventAttrs: events,
+                    parentForm: el.closest('form') !== null
+                };
+            }
+        """)
+        logging.info(f"Element event analysis: {has_events}")
 
     # First try to find clickable elements containing the text
     selectors = [
@@ -164,11 +188,25 @@ def find_and_click_button(page, button_text: str) -> bool:
         # Get the first element and check if it's clickable
         element = locator.first
         try:
+            # Debug: Get element details before clicking
+            element_info = element.evaluate("""
+                el => ({
+                    tagName: el.tagName,
+                    className: el.className,
+                    id: el.id,
+                    innerText: el.innerText?.substring(0, 100),
+                    outerHTML: el.outerHTML?.substring(0, 200)
+                })
+            """)
+            logging.info(f"Attempting to click element: {element_info}")
+            
             # Try to click the element directly
             element.click(timeout=5000)
             logging.info(f"Clicked text element containing '{normalized_text}'.")
             return True
-        except Exception:
+        except Exception as exc:
+            logging.warning(f"Direct click failed: {exc}")
+
             # If direct click fails, try to find a clickable parent
             try:
                 # Look for clickable parent elements
@@ -176,11 +214,20 @@ def find_and_click_button(page, button_text: str) -> bool:
                 for parent_sel in parent_selectors:
                     parent = element.locator(f"xpath=ancestor-or-self::{parent_sel}").first
                     if parent.count() > 0:
+                        parent_info = parent.evaluate("""
+                            el => ({
+                                tagName: el.tagName,
+                                className: el.className,
+                                id: el.id,
+                                onclick: el.onclick ? 'has onclick' : 'no onclick'
+                            })
+                        """)
+                        logging.info(f"Trying parent {parent_sel}: {parent_info}")
                         parent.click(timeout=5000)
                         logging.info(f"Clicked parent {parent_sel} containing '{normalized_text}'.")
                         return True
-            except Exception:
-                pass
+            except Exception as parent_exc:
+                logging.warning(f"Parent click failed: {parent_exc}")
 
     # Try to find any clickable element that might be the vote button
     # Look for common vote button patterns
@@ -196,22 +243,40 @@ def find_and_click_button(page, button_text: str) -> bool:
         try:
             elm = page.locator(selector)
             if elm.count() > 0:
+                elm_info = elm.evaluate("""
+                    el => ({
+                        tagName: el.tagName,
+                        className: el.className,
+                        id: el.id,
+                        innerText: el.innerText?.substring(0, 50)
+                    })
+                """)
+                logging.info(f"Trying vote selector '{selector}': {elm_info}")
                 elm.first.click(timeout=5000)
                 logging.info(f"Clicked potential vote button with selector '{selector}'.")
                 return True
-        except Exception:
-            continue
+        except Exception as vote_exc:
+            logging.debug(f"Vote selector '{selector}' failed: {vote_exc}")
 
     # Try specific selectors
     for selector in selectors:
         try:
             elm = page.locator(selector)
             if elm.count() > 0:
+                selector_info = elm.evaluate("""
+                    el => ({
+                        tagName: el.tagName,
+                        className: el.className,
+                        id: el.id,
+                        innerText: el.innerText?.substring(0, 50)
+                    })
+                """)
+                logging.info(f"Trying selector '{selector}': {selector_info}")
                 elm.first.click(timeout=5000)
                 logging.info(f"Clicked selector '{selector}'.")
                 return True
-        except Exception:
-            continue
+        except Exception as selector_exc:
+            logging.debug(f"Selector '{selector}' failed: {selector_exc}")
 
     logging.warning(f"Unable to find a clickable element containing '{normalized_text}'.")
     return False
@@ -240,6 +305,31 @@ def run_cycle(config: dict, cycle: int) -> bool:
             ignore_https_errors=True,
         )
 
+        # Set up network monitoring
+        network_requests = []
+        network_responses = []
+        
+        def on_request(request):
+            network_requests.append({
+                'url': request.url,
+                'method': request.method,
+                'headers': dict(request.headers),
+                'timestamp': datetime.now().isoformat()
+            })
+            logging.debug(f"Request: {request.method} {request.url}")
+
+        def on_response(response):
+            network_responses.append({
+                'url': response.url,
+                'status': response.status,
+                'headers': dict(response.headers),
+                'timestamp': datetime.now().isoformat()
+            })
+            logging.debug(f"Response: {response.status} {response.url}")
+
+        browser_context.on("request", on_request)
+        browser_context.on("response", on_response)
+
         try:
             page = browser_context.new_page()
             page.set_default_timeout(int(config.get("timeout_seconds", 60)) * 1000)
@@ -259,16 +349,76 @@ def run_cycle(config: dict, cycle: int) -> bool:
             if config.get("stealth_mode", False):
                 human_like_behavior(page)
             
+            # Check for JavaScript errors
+            js_errors = []
+            def on_page_error(error):
+                js_errors.append(str(error))
+            
+            page.on("pageerror", on_page_error)
+            
             # Wait a bit more for dynamic content
             page.wait_for_timeout(3000)
 
+            if js_errors:
+                logging.warning(f"JavaScript errors found: {len(js_errors)}")
+                for error in js_errors[-3:]:  # Show last 3 errors
+                    logging.warning(f"  JS ERROR: {error}")
+
             save_page_snapshot(page, save_html_dir, cycle)
+            
+            # Get page content before clicking for comparison
+            content_before = page.content()
+            
+            # Clear previous network logs before clicking
+            network_requests.clear()
+            network_responses.clear()
+            
             clicked = find_and_click_button(page, config.get("button_text", "Balsuoti"))
 
             if not clicked:
                 logging.warning("The button was not clicked. The page may have changed or the text is not present.")
             else:
                 logging.info("Button click completed.")
+                
+                # Wait a bit and monitor network activity after click
+                logging.info("Monitoring network activity after click...")
+                page.wait_for_timeout(5000)  # Wait 5 seconds for network activity
+                
+                # Get page content after clicking
+                content_after = page.content()
+                content_changed = content_before != content_after
+                logging.info(f"Page content changed after click: {content_changed}")
+                
+                if content_changed:
+                    # Look for success indicators
+                    success_indicators = ["ačiū", "thank", "success", "voted", "balsavote", "jūs jau balsavote"]
+                    found_success = any(indicator in content_after.lower() for indicator in success_indicators)
+                    logging.info(f"Found success indicators in page: {found_success}")
+                    
+                    if found_success:
+                        logging.info("SUCCESS: Vote appears to have been registered!")
+                    else:
+                        logging.warning("WARNING: Page changed but no success indicators found")
+                else:
+                    logging.warning("WARNING: Page content did not change after click")
+                
+                # Log network requests made after clicking
+                post_click_requests = [req for req in network_requests 
+                                     if datetime.fromisoformat(req['timestamp']) > datetime.now() - timedelta(seconds=10)]
+                post_click_responses = [resp for resp in network_responses 
+                                       if datetime.fromisoformat(resp['timestamp']) > datetime.now() - timedelta(seconds=10)]
+                
+                logging.info(f"Network requests after click: {len(post_click_requests)}")
+                for req in post_click_requests[-5:]:  # Show last 5 requests
+                    logging.info(f"  POST-CLICK REQUEST: {req['method']} {req['url']}")
+                
+                logging.info(f"Network responses after click: {len(post_click_responses)}")
+                for resp in post_click_responses[-5:]:  # Show last 5 responses
+                    logging.info(f"  POST-CLICK RESPONSE: {resp['status']} {resp['url']}")
+                    
+                    # Check for API calls that might indicate voting
+                    if 'api' in resp['url'].lower() or 'vote' in resp['url'].lower() or 'balsuoti' in resp['url'].lower():
+                        logging.info(f"  POTENTIAL VOTE API: {resp['status']} {resp['url']}")
 
             wait_seconds = int(config.get("wait_after_click_seconds", 15))
             if wait_seconds > 0:
