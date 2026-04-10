@@ -5,6 +5,7 @@ import os
 import random
 import sys
 import time
+import requests
 from datetime import datetime
 from pathlib import Path
 
@@ -40,6 +41,18 @@ def save_page_snapshot(page, save_dir: Path, cycle: int) -> None:
         logging.info(f"Saved HTML to {html_path} and screenshot to {screenshot_path}")
     except Exception as exc:
         logging.warning(f"Unable to save snapshot: {exc}")
+
+
+def get_current_ip() -> str:
+    """Get the current public IP address."""
+    try:
+        response = requests.get('https://api.ipify.org?format=json', timeout=5)
+        if response.status_code == 200:
+            ip_data = response.json()
+            return ip_data.get('ip', 'unknown')
+    except Exception as exc:
+        logging.debug(f"Could not get IP address: {exc}")
+    return 'unknown'
 
 
 def apply_stealth_measures(page, config: dict) -> None:
@@ -218,7 +231,7 @@ def run_cycle(config: dict, cycle: int) -> bool:
     proxy = None  # Removed Tor proxy
 
     with sync_playwright() as pw:
-        logging.info("Launching Chromium with Tor proxy.")
+        logging.info("Launching Chromium.")
         browser_context = pw.chromium.launch_persistent_context(
             user_data_dir=str(user_data_dir),
             headless=bool(config.get("headless", False)),
@@ -230,6 +243,10 @@ def run_cycle(config: dict, cycle: int) -> bool:
         try:
             page = browser_context.new_page()
             page.set_default_timeout(int(config.get("timeout_seconds", 60)) * 1000)
+            
+            # Get and log current IP address
+            current_ip = get_current_ip()
+            logging.info(f"Current IP address: {current_ip}")
             
             # Apply stealth measures
             apply_stealth_measures(page, config)
@@ -267,7 +284,7 @@ def run_cycle(config: dict, cycle: int) -> bool:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Tor-based Chromium click automation for lrytas site.")
+    parser = argparse.ArgumentParser(description="Chromium click automation for lrytas site.")
     parser.add_argument("--config", default="config.json", help="Path to config file")
     parser.add_argument("--once", action="store_true", help="Run a single cycle and exit")
     args = parser.parse_args()
