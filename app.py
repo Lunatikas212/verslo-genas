@@ -2,6 +2,7 @@
 import json
 import logging
 import os
+import random
 import sys
 import time
 from datetime import datetime
@@ -41,50 +42,159 @@ def save_page_snapshot(page, save_dir: Path, cycle: int) -> None:
         logging.warning(f"Unable to save snapshot: {exc}")
 
 
-def request_new_tor_identity(host: str, port: int, password: str | None) -> bool:
-    try:
-        from stem import Signal
-        from stem.control import Controller
-    except ImportError:
-        logging.warning("stem is not installed. Skipping Tor NEWNYM identity change.")
-        return False
+def apply_stealth_measures(page, config: dict) -> None:
+    """Apply various stealth measures to avoid detection."""
+    if not config.get("stealth_mode", False):
+        return
+    
+    # Random user agent
+    user_agents = config.get("user_agents", [])
+    if user_agents:
+        user_agent = random.choice(user_agents)
+        page.set_extra_http_headers({"User-Agent": user_agent})
+        logging.info(f"Set user agent: {user_agent[:50]}...")
+    
+    # Random viewport size
+    viewport_sizes = config.get("viewport_sizes", [])
+    if viewport_sizes:
+        viewport = random.choice(viewport_sizes)
+        page.set_viewport_size(viewport)
+        logging.info(f"Set viewport: {viewport['width']}x{viewport['height']}")
+    
+    # Random delay before actions
+    delay_min = config.get("random_delay_min", 1)
+    delay_max = config.get("random_delay_max", 5)
+    delay = random.uniform(delay_min, delay_max)
+    logging.info(f"Applying random delay: {delay:.1f} seconds")
+    time.sleep(delay)
+    """Apply various stealth measures to avoid detection."""
+    if not config.get("stealth_mode", False):
+        return
+    
+    # Random user agent
+    user_agents = config.get("user_agents", [])
+    if user_agents:
+        user_agent = random.choice(user_agents)
+        page.set_extra_http_headers({"User-Agent": user_agent})
+        logging.info(f"Set user agent: {user_agent[:50]}...")
+    
+    # Random viewport size
+    viewport_sizes = config.get("viewport_sizes", [])
+    if viewport_sizes:
+        viewport = random.choice(viewport_sizes)
+        page.set_viewport_size(viewport)
+        logging.info(f"Set viewport: {viewport['width']}x{viewport['height']}")
+    
+    # Random delay before actions
+    delay_min = config.get("random_delay_min", 1)
+    delay_max = config.get("random_delay_max", 5)
+    delay = random.uniform(delay_min, delay_max)
+    logging.info(f"Applying random delay: {delay:.1f} seconds")
+    time.sleep(delay)
 
+
+def human_like_behavior(page) -> None:
+    """Simulate human-like browsing behavior."""
+    # Random mouse movements
     try:
-        with Controller.from_port(address=host, port=port) as controller:
-            controller.authenticate(password=password or None)
-            controller.signal(Signal.NEWNYM)
-            logging.info("Requested new Tor identity (NEWNYM).")
-            return True
+        # Move mouse to random positions
+        for _ in range(random.randint(2, 5)):
+            x = random.randint(100, 1200)
+            y = random.randint(100, 800)
+            page.mouse.move(x, y)
+            time.sleep(random.uniform(0.1, 0.5))
+        
+        # Random scroll
+        scroll_amount = random.randint(200, 800)
+        page.evaluate(f"window.scrollBy(0, {scroll_amount})")
+        time.sleep(random.uniform(0.5, 1.5))
+        
     except Exception as exc:
-        logging.warning(f"Could not request Tor identity change: {exc}")
-        return False
+        logging.debug(f"Human behavior simulation failed: {exc}")
 
 
 def find_and_click_button(page, button_text: str) -> bool:
     normalized_text = button_text.strip()
 
+    # Debug: log what we find
+    locator = page.get_by_text(normalized_text, exact=False)
+    logging.info(f"Found {locator.count()} elements containing '{normalized_text}'")
+    
+    # Debug: count all buttons
+    all_buttons = page.locator("button")
+    logging.info(f"Found {all_buttons.count()} button elements on page")
+    
+    if locator.count() > 0:
+        element = locator.first
+        tag_name = element.evaluate("el => el.tagName")
+        classes = element.evaluate("el => el.className")
+        logging.info(f"First element: <{tag_name}> with classes: {classes}")
+        # Check if it's visible
+        is_visible = element.is_visible()
+        logging.info(f"Element is visible: {is_visible}")
+
+    # First try to find clickable elements containing the text
     selectors = [
         f"button:has-text(\"{normalized_text}\")",
         f"a:has-text(\"{normalized_text}\")",
         f"[role=button]:has-text(\"{normalized_text}\")",
         f"input[type=submit][value*='{normalized_text}']",
         f"input[type=button][value*='{normalized_text}']",
+        # Look for divs or spans that might be clickable and contain the text
+        f"div:has-text(\"{normalized_text}\")",
+        f"span:has-text(\"{normalized_text}\")",
     ]
 
+    # Try text locator first
     locator = page.get_by_text(normalized_text, exact=False)
     if locator.count() > 0:
+        # Get the first element and check if it's clickable
+        element = locator.first
         try:
-            locator.first.click(timeout=10000)
-            logging.info(f"Clicked text match for '{normalized_text}'.")
+            # Try to click the element directly
+            element.click(timeout=5000)
+            logging.info(f"Clicked text element containing '{normalized_text}'.")
             return True
-        except Exception as exc:
-            logging.warning(f"Text locator click failed: {exc}")
+        except Exception:
+            # If direct click fails, try to find a clickable parent
+            try:
+                # Look for clickable parent elements
+                parent_selectors = ["button", "a", "[role=button]", "input[type=submit]", "input[type=button]", "div[onclick]", "span[onclick]"]
+                for parent_sel in parent_selectors:
+                    parent = element.locator(f"xpath=ancestor-or-self::{parent_sel}").first
+                    if parent.count() > 0:
+                        parent.click(timeout=5000)
+                        logging.info(f"Clicked parent {parent_sel} containing '{normalized_text}'.")
+                        return True
+            except Exception:
+                pass
 
+    # Try to find any clickable element that might be the vote button
+    # Look for common vote button patterns
+    vote_selectors = [
+        "button:has(svg)",  # Button with icon
+        ".vote-button",
+        ".btn-vote",
+        "[data-action='vote']",
+        "[data-testid*='vote']",
+    ]
+    
+    for selector in vote_selectors:
+        try:
+            elm = page.locator(selector)
+            if elm.count() > 0:
+                elm.first.click(timeout=5000)
+                logging.info(f"Clicked potential vote button with selector '{selector}'.")
+                return True
+        except Exception:
+            continue
+
+    # Try specific selectors
     for selector in selectors:
         try:
             elm = page.locator(selector)
             if elm.count() > 0:
-                elm.first.click(timeout=10000)
+                elm.first.click(timeout=5000)
                 logging.info(f"Clicked selector '{selector}'.")
                 return True
         except Exception:
@@ -105,7 +215,7 @@ def run_cycle(config: dict, cycle: int) -> bool:
 
     user_data_dir = Path(config["user_data_dir"]).resolve()
     save_html_dir = Path(config["save_html_dir"]).resolve()
-    proxy = {"server": config["tor_proxy"]} if config.get("tor_proxy") else None
+    proxy = None  # Removed Tor proxy
 
     with sync_playwright() as pw:
         logging.info("Launching Chromium with Tor proxy.")
@@ -120,12 +230,23 @@ def run_cycle(config: dict, cycle: int) -> bool:
         try:
             page = browser_context.new_page()
             page.set_default_timeout(int(config.get("timeout_seconds", 60)) * 1000)
+            
+            # Apply stealth measures
+            apply_stealth_measures(page, config)
+            
             logging.info(f"Navigating to {config['url']}")
             page.goto(config["url"], wait_until="domcontentloaded")
             page.wait_for_load_state("networkidle")
+            
+            # Simulate human behavior
+            if config.get("stealth_mode", False):
+                human_like_behavior(page)
+            
+            # Wait a bit more for dynamic content
+            page.wait_for_timeout(3000)
 
             save_page_snapshot(page, save_html_dir, cycle)
-            clicked = find_and_click_button(page, config.get("button_text", "dalyvauti"))
+            clicked = find_and_click_button(page, config.get("button_text", "Balsuoti"))
 
             if not clicked:
                 logging.warning("The button was not clicked. The page may have changed or the text is not present.")
@@ -158,19 +279,12 @@ def main() -> int:
     logging.info("Starting automation app.")
     iterations = 0
     max_iterations = int(config.get("max_iterations", 0))
-    interval_seconds = int(config.get("click_interval_minutes", 60)) * 60
-
+    base_interval = int(config.get("click_interval_minutes", 60)) * 60
+    
     while True:
         iterations += 1
         logging.info(f"Starting cycle {iterations}.")
         success = run_cycle(config, iterations)
-
-        if config.get("use_tor_newnym", False):
-            request_new_tor_identity(
-                host=config.get("tor_control_host", "127.0.0.1"),
-                port=int(config.get("tor_control_port", 9051)),
-                password=config.get("tor_control_password", "") or None,
-            )
 
         if args.once:
             logging.info("Run-once mode enabled, exiting after first cycle.")
@@ -180,8 +294,17 @@ def main() -> int:
             logging.info(f"Reached max_iterations={max_iterations}. Exiting.")
             break
 
+        # Use random interval for stealth
+        if config.get("stealth_mode", False):
+            # Add random variation to base interval (±25%)
+            variation = base_interval * 0.25
+            interval_seconds = base_interval + random.uniform(-variation, variation)
+            interval_seconds = max(60, interval_seconds)  # Minimum 1 minute
+        else:
+            interval_seconds = base_interval
+
         if interval_seconds > 0:
-            logging.info(f"Sleeping {interval_seconds} seconds until next cycle.")
+            logging.info(f"Sleeping {interval_seconds:.0f} seconds until next cycle.")
             time.sleep(interval_seconds)
         else:
             logging.info("Interval is 0 or negative; exiting after one cycle.")
