@@ -1,0 +1,10 @@
+{
+  "error": true,
+  "url": "http://projektas.lrytas.lt/verslo-genas-2026/dalyvis/contacts/ieva.png",
+  "statusCode": 404,
+  "statusMessage": "Page not found: /dalyvis/contacts/ieva.png",
+  "message": "Page not found: /dalyvis/contacts/ieva.png",
+  "data": {
+    "path": "/dalyvis/contacts/ieva.png"
+  }
+}

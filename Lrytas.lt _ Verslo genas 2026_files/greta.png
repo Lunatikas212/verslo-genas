@@ -1,0 +1,10 @@
+{
+  "error": true,
+  "url": "http://projektas.lrytas.lt/verslo-genas-2026/dalyvis/contacts/greta.png",
+  "statusCode": 404,
+  "statusMessage": "Page not found: /dalyvis/contacts/greta.png",
+  "message": "Page not found: /dalyvis/contacts/greta.png",
+  "data": {
+    "path": "/dalyvis/contacts/greta.png"
+  }
+}

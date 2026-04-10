@@ -1,0 +1,17 @@
+{
+  "url": "https://projektas.lrytas.lt/verslo-genas-2026/dalyvis/74",
+  "click_interval_minutes": 60,
+  "wait_after_click_seconds": 15,
+  "tor_proxy": "socks5://127.0.0.1:9050",
+  "tor_control_host": "127.0.0.1",
+  "tor_control_port": 9051,
+  "tor_control_password": "",
+  "use_tor_newnym": true,
+  "user_data_dir": "./chromium_data",
+  "save_html_dir": "./lrytas",
+  "headless": false,
+  "max_iterations": 0,
+  "button_text": "dalyvauti",
+  "timeout_seconds": 60,
+  "log_file": "app.log"
+}
