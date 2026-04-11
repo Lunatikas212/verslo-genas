@@ -129,6 +129,18 @@ def human_like_behavior(page) -> None:
 def find_and_click_button(page, button_text: str) -> bool:
     normalized_text = button_text.strip()
 
+    def inspect_button_state(element):
+        return element.evaluate("""
+            el => ({
+                text: (el.innerText || '').trim().toLowerCase(),
+                className: el.className,
+                hasDisabledAttr: el.hasAttribute('disabled'),
+                ariaDisabled: el.getAttribute('aria-disabled') === 'true',
+                cursorNotAllowed: el.className.includes('cursor-not-allowed'),
+                isVisible: el.offsetParent !== null
+            })
+        """)
+
     # Debug: log what we find
     locator = page.get_by_text(normalized_text, exact=False)
     logging.info(f"Found {locator.count()} elements containing '{normalized_text}'")
@@ -141,7 +153,15 @@ def find_and_click_button(page, button_text: str) -> bool:
     page_text = page.inner_text("body")
     text_present = normalized_text.lower() in page_text.lower()
     logging.info(f"Button text '{normalized_text}' present in page body: {text_present}")
-    
+
+    if normalized_text.lower() == 'balsuoti' and 'balsuota' in page_text.lower():
+        already_voted_locator = page.get_by_text('Balsuota', exact=False)
+        if already_voted_locator.count() > 0:
+            already_state = inspect_button_state(already_voted_locator.first)
+            if already_state['cursorNotAllowed'] or already_state['hasDisabledAttr'] or already_state['ariaDisabled'] or already_state['text'].find('balsuota') != -1:
+                logging.info("System wasn't fooled: already-voted button detected on page.")
+                return False
+
     if locator.count() > 0:
         element = locator.first
         tag_name = element.evaluate("el => el.tagName")
@@ -150,6 +170,12 @@ def find_and_click_button(page, button_text: str) -> bool:
         # Check if it's visible
         is_visible = element.is_visible()
         logging.info(f"Element is visible: {is_visible}")
+
+        state = inspect_button_state(element)
+        logging.info(f"First element state: {state}")
+        if state['text'].find('balsuota') != -1 or state['cursorNotAllowed'] or state['hasDisabledAttr'] or state['ariaDisabled']:
+            logging.info("Detected already-voted or disabled button state; not attempting to click.")
+            return False
         
         # Check if element has event listeners
         has_events = element.evaluate("""
@@ -203,6 +229,11 @@ def find_and_click_button(page, button_text: str) -> bool:
                 })
             """)
             logging.info(f"Attempting to click element: {element_info}")
+
+            state = inspect_button_state(element)
+            if state['text'].find('balsuota') != -1 or state['cursorNotAllowed'] or state['hasDisabledAttr'] or state['ariaDisabled']:
+                logging.info("Detected already-voted or disabled button state before click; not clicking.")
+                return False
             
             # Try to click the element directly
             element.click(timeout=5000)
@@ -214,7 +245,7 @@ def find_and_click_button(page, button_text: str) -> bool:
             # If direct click fails, try to find a clickable parent
             try:
                 # Look for clickable parent elements
-                parent_selectors = ["button", "a", "*[@role='button']", "input[@type='submit']", "input[@type='button']", "div[@onclick]", "span[@onclick]", "div[contains(@class, 'cursor-pointer')]"]
+                parent_selectors = ["button", "a", "[role=button]", "input[type=submit]", "input[type=button]", "div[onclick]", "span[onclick]"]
                 for parent_sel in parent_selectors:
                     parent = element.locator(f"xpath=ancestor-or-self::{parent_sel}").first
                     if parent.count() > 0:
@@ -241,8 +272,6 @@ def find_and_click_button(page, button_text: str) -> bool:
         ".btn-vote",
         "[data-action='vote']",
         "[data-testid*='vote']",
-        "div.cursor-pointer",  # General clickable divs
-        "div.bg-single-btn",  # Specific class from HTML
     ]
     
     for selector in vote_selectors:
@@ -258,7 +287,12 @@ def find_and_click_button(page, button_text: str) -> bool:
                     })
                 """)
                 logging.info(f"Trying vote selector '{selector}': {elm_info}")
-                elm.first.click(timeout=5000)
+                candidate = elm.first
+                state = inspect_button_state(candidate)
+                if state['text'].find('balsuota') != -1 or state['cursorNotAllowed'] or state['hasDisabledAttr'] or state['ariaDisabled']:
+                    logging.info(f"Skipping selector '{selector}' because button is already voted/disabled: {state}")
+                    continue
+                candidate.click(timeout=5000)
                 logging.info(f"Clicked potential vote button with selector '{selector}'.")
                 return True
         except Exception as vote_exc:
@@ -278,7 +312,12 @@ def find_and_click_button(page, button_text: str) -> bool:
                     })
                 """)
                 logging.info(f"Trying selector '{selector}': {selector_info}")
-                elm.first.click(timeout=5000)
+                candidate = elm.first
+                state = inspect_button_state(candidate)
+                if state['text'].find('balsuota') != -1 or state['cursorNotAllowed'] or state['hasDisabledAttr'] or state['ariaDisabled']:
+                    logging.info(f"Skipping selector '{selector}' because button is already voted/disabled: {state}")
+                    continue
+                candidate.click(timeout=5000)
                 logging.info(f"Clicked selector '{selector}'.")
                 return True
         except Exception as selector_exc:
